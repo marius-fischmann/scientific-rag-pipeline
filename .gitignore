@@ -2,3 +2,4 @@
 grobid/logs/*
 grobid/results/*
 grobid/corpus_documents/*
+Example.json
