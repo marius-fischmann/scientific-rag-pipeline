@@ -1,0 +1,4 @@
+.venv/
+grobid/logs/*
+grobid/results/*
+grobid/corpus_documents/*

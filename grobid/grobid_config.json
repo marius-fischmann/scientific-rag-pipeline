@@ -1,0 +1,17 @@
+{
+  "grobid_server": "http://localhost:8070",
+  "sleep_time": 5,
+  "timeout": 180,
+  "coordinates": [
+    "title",
+    "head",
+    "p",
+    "s"
+  ],
+   "logging": {
+        "level": "WARNING",
+        "format": "%(asctime)s - %(levelname)s - %(message)s",
+        "console": true,
+        "file": "grobid/logs/grobid.log"
+    }
+}
