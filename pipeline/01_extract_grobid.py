@@ -4,7 +4,7 @@ from pathlib import Path
 from grobid_client.grobid_client import GrobidClient
 
 CONFIG_PATH = Path("pipeline/grobid_config.json")
-GROBID_SERVER = os.environ.get("GROBID_SERVER", "http://localhost:8071")
+GROBID_SERVER = os.environ.get("GROBID_SERVER", "http://localhost:8070")
 PDF_DIR = Path("data/raw/pdfs")
 RESULTS_DIR = Path("data/interim/grobid")
 # Only process the first PDFs for now, so the results can be reviewed early.
