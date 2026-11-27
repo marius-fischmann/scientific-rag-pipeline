@@ -3,7 +3,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
-DOCUMENTS_PATH = Path("data/processed/corpus.jsonl")
+DOCUMENTS_PATH = Path("data/processed/canonical_corpus.jsonl")
+LOG_PATH = Path("data/interim/logs/review_hints.log")
 
 NUMBERED_HEADING = re.compile(r"^([IVX]+|[A-Z])\.\s")
 COMMON_HEADINGS = {
@@ -53,46 +54,55 @@ COMMON_HEADINGS = {
     "data availability",
 }
 ARTIFACT = re.compile(r"foot_\d|\s\d+\s\)|\(\s|\s\)")
+SYMBOL_IN_HEADING = re.compile(r"[%:]")
 SHORT_PARAGRAPH_WORDS = 6
 
 
 def all_paragraphs(section):
-    yield from section["paragraphs"]
+    # Formulas are not prose, so text checks would only report noise for them.
+    for paragraph in section["paragraphs"]:
+        if paragraph["type"] != "formula":
+            yield paragraph
     for subsection in section["subsections"]:
-        yield from subsection["paragraphs"]
+        for paragraph in subsection["paragraphs"]:
+            if paragraph["type"] != "formula":
+                yield paragraph
 
 
 def check_missing_metadata(document):
-    # Fehlende Metadaten fallen bei der Auswahl für den Benchmark oft erst spät auf.
+    # Missing metadata often only surfaces late, when selecting papers for the benchmark.
     missing = [field for field in ("title", "year", "doi") if not document["metadata"].get(field)]
     if missing:
-        return [("missing_metadata", None, f"fehlt: {', '.join(missing)}")]
+        return [("missing_metadata", None, f"missing: {', '.join(missing)}")]
     return []
 
 
 def check_unnumbered_section(document):
-    # Überschriften ohne römische Zahl oder Buchstabe sind oft Abbildungstext oder Tabellenreste.
+    # Headings without a Roman numeral or letter are often figure text or table remnants.
+    # Headings with symbols are reported by check_heading_symbols instead, so they are not listed twice.
     hints = []
     for section in document["sections"]:
         title = section["title"] or ""
         if not title or NUMBERED_HEADING.match(title) or title.lower() in COMMON_HEADINGS:
+            continue
+        if SYMBOL_IN_HEADING.search(title):
             continue
         hints.append(("unnumbered_section", section["section_id"], title))
     return hints
 
 
 def check_heading_symbols(document):
-    # Prozentzeichen oder Doppelpunkte in Überschriften deuten auf eingebettete Grafiken hin.
+    # Percent signs or colons in headings often indicate embedded graphics.
     hints = []
     for section in document["sections"]:
         title = section["title"] or ""
-        if re.search(r"[%:]", title):
+        if SYMBOL_IN_HEADING.search(title):
             hints.append(("heading_symbols", section["section_id"], title))
     return hints
 
 
 def check_duplicate_subsections(document):
-    # Doppelte Unterabschnitts-Titel in derselben Section sind meist eine falsch erkannte Gliederung.
+    # Duplicate subsection titles within the same section usually mean the structure was misdetected.
     hints = []
     for section in document["sections"]:
         counts = Counter(sub["title"] for sub in section["subsections"])
@@ -103,7 +113,7 @@ def check_duplicate_subsections(document):
 
 
 def check_empty_section(document):
-    # Leere Sections entstehen, wenn GROBID eine Überschrift ohne Fließtext erkennt.
+    # Empty sections appear when GROBID detects a heading without body text.
     return [
         ("empty_section", section["section_id"], section["title"] or "")
         for section in document["sections"]
@@ -112,7 +122,7 @@ def check_empty_section(document):
 
 
 def check_short_paragraphs(document):
-    # Sehr kurze Absätze sind häufig Listenreste, Bildbeschriftungen oder Zeilenumbrüche.
+    # Very short paragraphs are often list remnants, figure captions, or line breaks.
     hints = []
     for section in document["sections"]:
         for paragraph in all_paragraphs(section):
@@ -122,7 +132,7 @@ def check_short_paragraphs(document):
 
 
 def check_lowercase_start(document):
-    # Absätze, die klein anfangen, wurden oft an einer falschen Stelle getrennt.
+    # Paragraphs starting in lowercase were often split at the wrong position.
     hints = []
     for section in document["sections"]:
         for paragraph in all_paragraphs(section):
@@ -133,7 +143,7 @@ def check_lowercase_start(document):
 
 
 def check_residual_artifacts(document):
-    # Reste der Bereinigung (Fußnoten-Tokens, Klammern mit Leerzeichen) sind Hinweise auf Lücken im Parser.
+    # Leftovers from cleaning (footnote tokens, brackets with spaces) point to gaps in the parser.
     hints = []
     for section in document["sections"]:
         for paragraph in all_paragraphs(section):
@@ -163,16 +173,21 @@ def main():
     with DOCUMENTS_PATH.open(encoding="utf-8") as f:
         documents = [json.loads(line) for line in f]
 
+    lines = []
     total = 0
     for document in documents:
         hints = [hint for check in CHECKS for hint in check(document)]
         if not hints:
             continue
         total += len(hints)
-        print(f"\n== {document['doc_id']} ({len(hints)} Hinweise)")
+        title = document["metadata"].get("title") or "(no title)"
+        lines.append(f"\n== {title} | {document['doc_id']} ({len(hints)} hints)")
         for rule, location, detail in hints:
-            print(f"  [{rule}] {location or '-'}: {snippet(detail)}")
-    print(f"\n{total} Hinweise in {len(documents)} Dokumenten")
+            lines.append(f"  [{rule}] {location or '-'}: {snippet(detail)}")
+
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LOG_PATH.write_text("\n".join(lines).lstrip("\n") + "\n", encoding="utf-8")
+    print(f"{total} hints in {len(documents)} documents, written to {LOG_PATH}")
 
 
 if __name__ == "__main__":

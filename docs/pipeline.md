@@ -1,30 +1,30 @@
-# Korpus-Pipeline
+# Corpus Pipeline
 
-Die Pipeline erzeugt aus den PDFs die kanonische Darstellung des Korpus (`data/processed/corpus.jsonl`). Sie führt keine RAG-Schritte aus.
+The pipeline turns the PDFs into the canonical representation of the corpus (`data/processed/canonical_corpus.jsonl`). It does not perform any RAG steps.
 
 ```mermaid
 flowchart LR
-    subgraph raw["data/raw (Eingabe)"]
+    subgraph raw["data/raw (input)"]
         pdfs["pdfs/*.pdf"]
         zot["zotero/zotero_corpus.csv"]
     end
 
-    grobid["GROBID-Server<br/>(docker/compose.yaml)"]
+    grobid["GROBID server<br/>(docker/compose.yaml)"]
     s1["01_extract_grobid.py"]
     s2["02_parse_documents.py"]
     s3["03_merge_zotero.py"]
     s4["04_review_hints.py"]
 
-    subgraph interim["data/interim (Zwischenstand)"]
-        tei["grobid/*.json<br/>(rohe GROBID-Ausgabe)"]
-        docs["documents.jsonl<br/>(bereinigter Text, GROBID-Metadaten)"]
+    subgraph interim["data/interim (intermediate)"]
+        tei["grobid/*.json<br/>(raw GROBID output)"]
+        docs["parsed_documents.jsonl<br/>(cleaned text, GROBID metadata)"]
     end
 
-    subgraph processed["data/processed (Ergebnis)"]
-        corpus["corpus.jsonl<br/>(Text + Zotero-Metadaten)"]
+    subgraph processed["data/processed (result)"]
+        corpus["canonical_corpus.jsonl<br/>(text + Zotero metadata)"]
     end
 
-    hints["Konsole: Prüfhinweise<br/>(ändern keine Daten)"]
+    hints["Log: review_hints.log<br/>(do not change data)"]
 
     pdfs --> s1
     s1 -->|HTTP| grobid
@@ -37,28 +37,35 @@ flowchart LR
     corpus --> s4 --> hints
 ```
 
-## Schritte
+## Steps
 
-| Skript | Eingabe | Ausgabe | Zweck |
+| Script | Input | Output | Purpose |
 |---|---|---|---|
-| `pipeline/01_extract_grobid.py` | `data/raw/pdfs/` | `data/interim/grobid/` | PDFs über GROBID in strukturiertes JSON umwandeln. GROBID macht nur Text- und Strukturextraktion. |
-| `pipeline/02_parse_documents.py` | `data/interim/grobid/` | `data/interim/documents.jsonl` | Text bereinigen, Abschnittshierarchie ableiten, stabile `paragraph_id`s vergeben. |
-| `pipeline/03_merge_zotero.py` | `data/interim/documents.jsonl`, `data/raw/zotero/zotero_corpus.csv` | `data/processed/corpus.jsonl` | Bibliografische Metadaten und Abstracts aus Zotero übernehmen. Zuordnung über DOI, sonst normalisierter Titel. |
-| `pipeline/04_review_hints.py` | `data/processed/corpus.jsonl` | Konsole | Stellen markieren, die manuell geprüft werden sollten. Die Daten bleiben unverändert. |
+| `pipeline/01_extract_grobid.py` | `data/raw/pdfs/` | `data/interim/grobid/` | Convert PDFs into structured JSON via GROBID. GROBID only performs text and structure extraction. |
+| `pipeline/02_parse_documents.py` | `data/interim/grobid/` | `data/interim/parsed_documents.jsonl` | Clean the text, derive the section hierarchy, assign stable `paragraph_id`s. Each paragraph has a `type` of `text`, `formula`, or `caption`. Bullet markers and empty residues are removed. |
+| `pipeline/03_merge_zotero.py` | `data/interim/parsed_documents.jsonl`, `data/raw/zotero/zotero_corpus.csv` | `data/processed/canonical_corpus.jsonl` | Take bibliographic metadata and abstracts from Zotero. Matching by DOI, otherwise by normalized title. |
+| `pipeline/04_review_hints.py` | `data/processed/canonical_corpus.jsonl` | `data/interim/logs/review_hints.log` | Flag spots that should be checked manually. The data stays unchanged. |
+| `pipeline/00_run_all.py` | - | - | Runs steps 01 to 04 in order and stops on the first error. |
 
-Die Skripte laufen aus dem Repository-Wurzelverzeichnis, weil die Pfade relativ sind.
+The scripts run from the repository root because the paths are relative.
 
-## Ausführung
+## Execution
 
 ```bash
 docker compose -f docker/compose.yaml up -d
-source .venv/bin/activate
-python pipeline/01_extract_grobid.py
-python pipeline/02_parse_documents.py
-python pipeline/03_merge_zotero.py
-python pipeline/04_review_hints.py
+uv sync
+uv run python pipeline/00_run_all.py
 ```
 
-## Datenordner
+To run the steps individually:
 
-`data/` ist vollständig in `.gitignore` eingetragen. Die Dateien enthalten Volltext und Metadaten aus fremden Veröffentlichungen. Die Skripte erzeugen alles neu, sodass nichts Eigenes verloren geht. Die Ausnahme bildet der Zotero-Export: Er muss manuell neu aus Zotero exportiert werden.
+```bash
+uv run python pipeline/01_extract_grobid.py
+uv run python pipeline/02_parse_documents.py
+uv run python pipeline/03_merge_zotero.py
+uv run python pipeline/04_review_hints.py
+```
+
+## Data folder
+
+`data/` is fully listed in `.gitignore`. The files contain full text and metadata from third-party publications. The scripts regenerate everything, so nothing of your own is lost. The exception is the Zotero export: it has to be exported again from Zotero manually.

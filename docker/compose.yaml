@@ -1,10 +1,20 @@
 services:
 # service for GROBID (GeneRation Of BIbliographic Data) which is used to extract 
 # bibliographic data from scientific documents
-  grobid:
-    image: grobid/grobid:0.9.1-crf
+  # grobid:
+  #   image: grobid/grobid:0.9.1-crf
+  #   init: true
+  #   ulimits:
+  #     core: 0
+  #   ports:
+  #     - "8070:8070"
+  # Full image with Deep Learning models (~8 GB, runs on CPU). To use it, uncomment this
+  # service, start it with `docker compose -f docker/compose.yaml up -d grobid-full`,
+  # and run the pipeline with GROBID_SERVER=http://localhost:8071.
+  grobid-full:
+    image: grobid/grobid:0.9.1-full
     init: true
     ulimits:
       core: 0
     ports:
-      - "8070:8070"
+      - "8071:8070"

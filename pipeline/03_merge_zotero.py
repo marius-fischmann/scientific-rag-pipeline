@@ -3,29 +3,29 @@ import json
 import re
 from pathlib import Path
 
-DOCUMENTS_PATH = Path("data/interim/documents.jsonl")
+DOCUMENTS_PATH = Path("data/interim/parsed_documents.jsonl")
 ZOTERO_PATH = Path("data/raw/zotero/zotero_corpus.csv")
-OUTPUT_PATH = Path("data/processed/corpus.jsonl")
+OUTPUT_PATH = Path("data/processed/canonical_corpus.jsonl")
 
 DOI_PREFIX = re.compile(r"^(https?://(dx\.)?doi\.org/|doi:)", re.IGNORECASE)
 
 
 def normalize_doi(doi):
-    # DOIs kommen in unterschiedlicher Schreibweise vor (Groß/Klein, Präfix); für den Vergleich vereinheitlichen.
+    # DOIs appear in different spellings (case, prefix), so normalize them before comparing.
     if not doi:
         return None
     return DOI_PREFIX.sub("", doi.strip()).lower()
 
 
 def normalize_title(title):
-    # Titel-Vergleich unabhängig von Groß/Klein, Satzzeichen und Leerzeichen.
+    # Compare titles regardless of case, punctuation, and whitespace.
     if not title:
         return None
     return re.sub(r"[^a-z0-9]+", "", title.lower()) or None
 
 
 def format_author(author):
-    # Zotero-CSV schreibt "Nachname, Vorname"; korporative Autoren haben kein Komma.
+    # The Zotero CSV writes "Last, First"; corporate authors have no comma.
     family, _, given = author.partition(", ")
     return f"{given} {family}" if given else family
 
@@ -61,21 +61,25 @@ def build_indexes(rows):
 
 
 def match_item(document, by_doi, by_title):
-    # Zuerst über die DOI zuordnen; nur wenn keine DOI vorliegt oder sie nicht passt, über den Titel.
+    # Match by DOI first; fall back to the title only if there is no DOI or it does not match.
     grobid = document["grobid_metadata"]
-    for key, index in ((normalize_doi(grobid.get("doi")), by_doi), (normalize_title(grobid.get("title")), by_title)):
+    lookups = (
+        (normalize_doi(grobid.get("doi")), by_doi),
+        (normalize_title(grobid.get("title")), by_title),
+    )
+    for key, index in lookups:
         candidates = index.get(key, []) if key else []
         if len(candidates) == 1:
             return candidates[0], None
         if len(candidates) > 1:
-            return None, f"mehrdeutig ({len(candidates)} Treffer)"
-    return None, "kein Treffer über DOI oder Titel"
+            return None, f"ambiguous ({len(candidates)} matches)"
+    return None, "no match by DOI or title"
 
 
 def main():
     with DOCUMENTS_PATH.open(encoding="utf-8") as f:
         documents = [json.loads(line) for line in f]
-    # utf-8-sig, weil Zotero-CSV mit BOM geschrieben wird.
+    # utf-8-sig because the Zotero CSV is written with a BOM.
     with ZOTERO_PATH.open(encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
 
@@ -87,7 +91,7 @@ def main():
         if row is None:
             unmatched.append((document["doc_id"], reason))
             continue
-        # Zotero-Abstract ist die Quelle; ohne Zotero-Abstract bleibt der GROBID-Abstract.
+        # The Zotero abstract is the source; fall back to the GROBID abstract if it is missing.
         zotero_abstract = row["Abstract Note"].strip()
         corpus.append({
             "doc_id": document["doc_id"],
@@ -102,9 +106,9 @@ def main():
         for entry in corpus:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    print(f"{len(corpus)} von {len(documents)} Dokumenten zugeordnet, geschrieben nach {OUTPUT_PATH}")
+    print(f"{len(corpus)} of {len(documents)} documents matched, written to {OUTPUT_PATH}")
     for doc_id, reason in unmatched:
-        print(f"  nicht zugeordnet: {doc_id[:60]} ({reason})")
+        print(f"  unmatched: {doc_id[:60]} ({reason})")
 
 
 if __name__ == "__main__":

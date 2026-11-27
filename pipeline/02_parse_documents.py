@@ -5,9 +5,9 @@ import uuid
 from pathlib import Path
 
 RESULTS_DIR = Path("data/interim/grobid")
-CORPUS_DIR = Path("data/raw/pdfs")
-OUTPUT_PATH = Path("data/interim/documents.jsonl")
-# Fixed namespace for deterministic document IDs. Changing it changes every doc_id.
+PDF_DIR = Path("data/raw/pdfs")
+OUTPUT_PATH = Path("data/interim/parsed_documents.jsonl")
+# Fixed namespace for deterministic doc_ids; changing it changes every ID.
 DOC_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/marius-fischmann/scientific-rag-pipeline")
 
 FOOTNOTE_TOKEN = re.compile(r"foot_\d+")
@@ -17,6 +17,10 @@ SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([,.;:)])")
 DROP_CAP = re.compile(r"^([A-Z]) ([A-Z]{2,})\b")
 ROMAN_HEADING = re.compile(r"^[IVX]+\.\s")
 LETTER_HEADING = re.compile(r"^[A-Z]\.\s")
+# Captions are "Table 2." or "Figure 3:" followed by text; running sentences like "Figure 1 illustrates" do not match.
+CAPTION_START = re.compile(r"^(Table|Figure|Fig\.)\s*\d+[.:]\s")
+LIST_MARKER = re.compile(r"^(?:[•▪■–-]|o)\s+")
+OPENING_BRACKET_SPACE = re.compile(r"\(\s+")
 
 
 def remove_footnote_tokens(text):
@@ -38,7 +42,16 @@ def fix_drop_cap(text):
 
 def normalize_whitespace(text):
     text = SPACE_BEFORE_PUNCTUATION.sub(r"\1", text)
+    text = OPENING_BRACKET_SPACE.sub("(", text)
     return " ".join(text.split())
+
+
+def paragraph_type(block, text):
+    if block.get("type") == "formula":
+        return "formula"
+    if CAPTION_START.match(text):
+        return "caption"
+    return "text"
 
 
 def new_section(title):
@@ -88,26 +101,27 @@ def build_document(data, doc_id, source_file):
     for block, is_abstract in blocks:
         text = block["text"]
 
-        # Remove GROBID footnote link tokens such as "Actfoot_1", which are not part of the sentence.
+        # GROBID appends footnote link tokens such as "foot_1" to words.
         text = remove_footnote_tokens(text)
-        # Remove footnote numbers such as "(3GPP 1 )" because they add noise to embeddings and keyword search.
         text = remove_footnote_numbers(text)
-        # Fix the separated first letter of drop caps ("T HE" -> "THE") that GROBID produces for the first word.
+        # GROBID separates the first letter of drop caps ("T HE" -> "THE").
         text = fix_drop_cap(text)
-        # Collapse the gaps left by the removals above so that the text reads naturally again.
         text = normalize_whitespace(text)
+        # Bullet glyphs become list text without a marker; blocks with no letters or digits (e.g. "•", ")") are dropped.
+        text = LIST_MARKER.sub("", text)
+        if not re.search(r"\w", text):
+            continue
 
         if is_abstract:
             abstract_parts.append(text)
             continue
 
-        # Open a new section or subsection whenever GROBID's heading changes, so that paragraphs are nested
-        # below the correct parent. head_section alone mixes section and subsection levels.
+        # head_section mixes section and subsection levels, so only open a new heading when it changes.
         head = block.get("head_section")
         if head != current_head:
             open_heading(sections, head)
             current_head = head
-        append_paragraph(sections, {"paragraph_id": block["id"], "text": text})
+        append_paragraph(sections, {"paragraph_id": block["id"], "type": paragraph_type(block, text), "text": text})
 
     assign_section_ids(sections)
     return {
@@ -123,15 +137,20 @@ def build_document(data, doc_id, source_file):
         "sections": sections,
     }
 
-if __name__ == "__main__":
+
+def main():
     documents = []
     for path in sorted(RESULTS_DIR.glob("*.json")):
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
-        pdf_path = CORPUS_DIR / f"{path.stem}.pdf"
+        pdf_path = PDF_DIR / f"{path.stem}.pdf"
         documents.append(build_document(data, doc_id_for_pdf(pdf_path), pdf_path.name))
 
     with OUTPUT_PATH.open("w", encoding="utf-8") as f:
         for document in documents:
             f.write(json.dumps(document, ensure_ascii=False) + "\n")
     print(f"{len(documents)} documents written to {OUTPUT_PATH}")
+
+
+if __name__ == "__main__":
+    main()
