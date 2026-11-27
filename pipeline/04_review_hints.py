@@ -3,7 +3,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
-DOCUMENTS_PATH = Path("grobid/documents.jsonl")
+DOCUMENTS_PATH = Path("data/processed/corpus.jsonl")
 
 NUMBERED_HEADING = re.compile(r"^([IVX]+|[A-Z])\.\s")
 COMMON_HEADINGS = {
@@ -64,7 +64,7 @@ def all_paragraphs(section):
 
 def check_missing_metadata(document):
     # Fehlende Metadaten fallen bei der Auswahl für den Benchmark oft erst spät auf.
-    missing = [field for field in ("title", "year", "doi") if not document.get(field)]
+    missing = [field for field in ("title", "year", "doi") if not document["metadata"].get(field)]
     if missing:
         return [("missing_metadata", None, f"fehlt: {', '.join(missing)}")]
     return []

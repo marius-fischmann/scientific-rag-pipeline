@@ -12,6 +12,6 @@
         "level": "WARNING",
         "format": "%(asctime)s - %(levelname)s - %(message)s",
         "console": true,
-        "file": "grobid/logs/grobid.log"
+        "file": "data/interim/logs/grobid.log"
     }
 }

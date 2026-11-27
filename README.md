@@ -26,6 +26,10 @@ If `python3 -m venv` fails with an `ensurepip` error, install `python3.12-venv` 
 
 Usage and documentation: https://github.com/grobidOrg/grobid-client-python
 
+## Pipeline
+
+The corpus pipeline (PDF → GROBID → parsing → Zotero merge) is described in [docs/pipeline.md](docs/pipeline.md), including the run commands.
+
 scientific-retrieval-benchmark/
 │
 ├── datasets/

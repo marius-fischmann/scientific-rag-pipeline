@@ -1,9 +1,14 @@
+import hashlib
 import json
 import re
+import uuid
 from pathlib import Path
 
-RESULTS_DIR = Path("grobid/results")
-OUTPUT_PATH = Path("grobid/documents.jsonl")
+RESULTS_DIR = Path("data/interim/grobid")
+CORPUS_DIR = Path("data/raw/pdfs")
+OUTPUT_PATH = Path("data/interim/documents.jsonl")
+# Fixed namespace for deterministic document IDs. Changing it changes every doc_id.
+DOC_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/marius-fischmann/scientific-rag-pipeline")
 
 FOOTNOTE_TOKEN = re.compile(r"foot_\d+")
 FOOTNOTE_NUMBER = re.compile(r"(?P<word>[A-Za-z]+)\s\d{1,2}\s+(?=[).,;])")
@@ -66,7 +71,12 @@ def assign_section_ids(sections):
         section["section_id"] = f"s{index}"
 
 
-def build_document(data, doc_id):
+def doc_id_for_pdf(pdf_path):
+    content_hash = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    return str(uuid.uuid5(DOC_ID_NAMESPACE, content_hash))
+
+
+def build_document(data, doc_id, source_file):
     biblio = data.get("biblio", {})
     sections = []
     abstract_parts = []
@@ -102,27 +112,26 @@ def build_document(data, doc_id):
     assign_section_ids(sections)
     return {
         "doc_id": doc_id,
-        "title": biblio.get("title"),
-        "authors": biblio.get("authors", []),
-        "year": biblio.get("publication_year"),
-        "doi": biblio.get("doi"),
+        "source_file": source_file,
+        "grobid_metadata": {
+            "title": biblio.get("title"),
+            "authors": biblio.get("authors", []),
+            "year": biblio.get("publication_year"),
+            "doi": biblio.get("doi"),
+        },
         "abstract": " ".join(abstract_parts),
         "sections": sections,
     }
 
-
-def main():
+if __name__ == "__main__":
     documents = []
     for path in sorted(RESULTS_DIR.glob("*.json")):
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
-        documents.append(build_document(data, path.stem))
+        pdf_path = CORPUS_DIR / f"{path.stem}.pdf"
+        documents.append(build_document(data, doc_id_for_pdf(pdf_path), pdf_path.name))
 
     with OUTPUT_PATH.open("w", encoding="utf-8") as f:
         for document in documents:
             f.write(json.dumps(document, ensure_ascii=False) + "\n")
     print(f"{len(documents)} documents written to {OUTPUT_PATH}")
-
-
-if __name__ == "__main__":
-    main()
